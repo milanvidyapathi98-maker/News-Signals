@@ -1,9 +1,11 @@
 """Step 3 – Turn scored headlines into one score and a BUY / SELL / HOLD signal."""
 
-import math
 from datetime import datetime, timezone
 
+from urllib.parse import quote
+
 import pandas as pd
+import requests
 import yfinance as yf
 
 import config
@@ -26,31 +28,66 @@ def aggregate(articles: list[dict]) -> float:
     return total / weights if weights else 0.0
 
 
+def _prices_yfinance(ticker: str) -> tuple[pd.Series, str]:
+    """Daily closing prices via the yfinance package."""
+    tk = yf.Ticker(ticker)
+    hist = tk.history(period="6mo")
+    if hist is None or hist.empty:
+        raise ValueError("no data returned")
+    try:
+        currency = tk.fast_info["currency"] or ""
+    except Exception:
+        currency = ""
+    return hist["Close"].dropna(), currency
+
+
+def _prices_yahoo_chart(ticker: str) -> tuple[pd.Series, str]:
+    """Backup: Yahoo's chart endpoint called directly (works when yfinance is blocked/broken)."""
+    for host in ("query2", "query1"):
+        resp = requests.get(
+            f"https://{host}.finance.yahoo.com/v8/finance/chart/{quote(ticker)}",
+            params={"range": "6mo", "interval": "1d"},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            break
+    resp.raise_for_status()
+    result = resp.json()["chart"]["result"][0]
+    closes = result["indicators"]["quote"][0]["close"]
+    index = pd.to_datetime(result["timestamp"], unit="s")
+    return pd.Series(closes, index=index, dtype="float64").dropna(), result["meta"].get("currency", "")
+
+
 def price_trend(ticker: str) -> dict:
     """Price history, 50-day moving average and trend (price above/below MA50)."""
-    empty = {"price": None, "ma50": None, "trend": "unknown", "change_pct": None,
-             "currency": "", "history": None}
-    try:
-        tk = yf.Ticker(ticker)
-        hist = tk.history(period="6mo")["Close"].dropna()
-        if len(hist) < 50:
-            return empty
-        ma = hist.rolling(50).mean()
-        price, ma50 = float(hist.iloc[-1]), float(ma.iloc[-1])
+    result = {"price": None, "ma50": None, "trend": "unknown", "change_pct": None,
+              "currency": "", "history": None, "price_error": ""}
+    errors = []
+    for name, source in (("yfinance", _prices_yfinance), ("Yahoo chart", _prices_yahoo_chart)):
         try:
-            currency = tk.fast_info["currency"] or ""
-        except Exception:
-            currency = ""
-        return {
-            "price": price,
-            "ma50": ma50,
-            "trend": "up" if price > ma50 else "down",
-            "change_pct": float(hist.iloc[-1] / hist.iloc[-2] - 1) * 100,
-            "currency": currency,
-            "history": pd.DataFrame({"Close": hist, "MA50": ma}),
-        }
-    except Exception:
-        return empty
+            hist, currency = source(ticker)
+            if len(hist) >= 50:
+                break
+            errors.append(f"{name}: only {len(hist)} days of prices")
+        except Exception as e:
+            errors.append(f"{name}: {e.__class__.__name__} – {str(e)[:100]}")
+    else:
+        result["price_error"] = " | ".join(errors)
+        print(f"[prices] {ticker} {result['price_error']}")
+        return result
+
+    ma = hist.rolling(50).mean()
+    price, ma50 = float(hist.iloc[-1]), float(ma.iloc[-1])
+    result.update({
+        "price": price,
+        "ma50": ma50,
+        "trend": "up" if price > ma50 else "down",
+        "change_pct": float(hist.iloc[-1] / hist.iloc[-2] - 1) * 100,
+        "currency": currency,
+        "history": pd.DataFrame({"Close": hist, "MA50": ma}),
+    })
+    return result
 
 
 def decide(score: float, n: int, trend: str, require_trend: bool) -> tuple[str, str]:
