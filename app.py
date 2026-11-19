@@ -465,7 +465,8 @@ with tab_detail:
             st.plotly_chart(price_chart(r), use_container_width=True,
                             config={"displayModeBar": False})
         else:
-            st.info("No price history available for this ticker.")
+            st.info("No price history available for this ticker."
+                    + (f"\n\nReason: {r['price_error']}" if r.get("price_error") else ""))
     with right:
         st.markdown('<div class="ns-section">Latest headlines</div>', unsafe_allow_html=True)
         if r["articles"]:
