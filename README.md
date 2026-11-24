@@ -4,10 +4,7 @@
 
 NewsSignal reads the latest news about a company, scores every headline with a finance-trained AI model (FinBERT), and turns the result into a clear **BUY / SELL / HOLD** signal. If you want, it also checks the signal against the price trend first. Everything is shown in an interactive dashboard built with Streamlit.
 
-> 🔗 **Live demo:**(https://news-signals-zww8xqruslnhadjnvl8qgn.streamlit.app/)
-
-![NewsSignal dashboard](docs/screenshot.png)
-<!-- Add a screenshot of the running app as docs/screenshot.png -->
+> 🔗 **Live demo:**https://news-signals-zww8xqruslnhadjnvl8qgn.streamlit.app/
 
 ---
 
